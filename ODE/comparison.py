@@ -87,7 +87,7 @@ def run_comparison(problem, reference_function, output_dir="comparison_results")
     plt.tight_layout()
     plt.savefig(output_path / f"comparison_plot_h{plot_h}.png")
     plt.show(block=False)
-    plt.pause(2.0)
+    plt.pause(30.0)
     plt.close()
     
     print(f"\nComparison results saved in: {output_path.resolve()}")
