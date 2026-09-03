@@ -1,13 +1,13 @@
 """
-main.py
-=======
+2023331039-4-MAIN.py
+====================
 Master runner for the Numerical Integration Suite:
 a. Trapezoidal Rule (Single & Multiple Segments)
 b. Simpson's 1/3 Rule (2 Segments & Multiple Segments)
 c. Combination of Trapezoidal and Simpson's 1/3 Method for Datasets
 
 Run:
-    python main.py
+    python 2023331039-4-MAIN.py
 """
 
 from __future__ import annotations

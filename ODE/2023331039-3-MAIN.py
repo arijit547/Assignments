@@ -1,6 +1,6 @@
 """
-main.py
-=======
+2023331039-3-MAIN.py
+====================
 Master runner for the Numerical ODE Solver & Analysis Suite:
 1. Euler's Method (1st Order Runge-Kutta)
 2. Heun's Method (2nd Order Runge-Kutta, a2 = 1/2)
@@ -12,7 +12,7 @@ Master runner for the Numerical ODE Solver & Analysis Suite:
 8. Launch Interactive Problem Input GUI
 
 Run:
-    python main.py
+    python 2023331039-3-MAIN.py
 """
 
 from __future__ import annotations
