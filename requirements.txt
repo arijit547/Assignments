@@ -1,0 +1,8 @@
+# Numerical Methods & Analysis Assignment Dependencies
+# Compatible with Integration, Interpolation, and ODE modules
+
+numpy>=1.24.0
+scipy>=1.10.0
+sympy>=1.12
+matplotlib>=3.7.0
+pandas>=2.0.0
