@@ -75,6 +75,25 @@ class NewtonTermEvaluation:
     term_value: float
 
 
+def newton_to_standard_poly(x_pts: np.ndarray, b_coeffs: np.ndarray) -> np.ndarray:
+    """
+    Expands Newton's divided difference polynomial:
+    P(x) = b0 + b1*(x - x0) + b2*(x - x0)*(x - x1) + ...
+    into standard canonical polynomial coefficients [a0, a1, ..., an]
+    where P(x) = sum(a_i * x^i).
+    """
+    n = len(b_coeffs)
+    current_poly = np.array([b_coeffs[0]], dtype=float)
+    term_poly = np.array([1.0], dtype=float)
+
+    for i in range(1, n):
+        term_poly = np.convolve(term_poly, [-x_pts[i - 1], 1.0])
+        padded_current = np.pad(current_poly, (0, len(term_poly) - len(current_poly)))
+        current_poly = padded_current + b_coeffs[i] * term_poly
+
+    return current_poly
+
+
 @dataclass
 class NewtonInterpolationResult:
     order: int
@@ -87,6 +106,12 @@ class NewtonInterpolationResult:
     term_evaluations: list[NewtonTermEvaluation]
     interpolated_value: float
     approx_error_percent: float | None = None
+    is_extrapolated: bool = False
+    canonical_coefficients: np.ndarray | None = None
+
+    def __post_init__(self):
+        if self.canonical_coefficients is None:
+            self.canonical_coefficients = newton_to_standard_poly(self.x_points, self.coefficients_b)
 
     @property
     def newton_formula_string(self) -> str:
@@ -98,6 +123,19 @@ class NewtonInterpolationResult:
                 factors = "".join(f"(x - {self.x_points[k]:g})" for k in range(i))
                 sign = "+ " if b >= 0 else "- "
                 terms.append(f"{sign}{abs(b):.6f}*{factors}")
+        return "P(x) = " + " ".join(terms)
+
+    @property
+    def polynomial_string(self) -> str:
+        """Canonical expanded polynomial string P(x) = a0 + a1*x + ..."""
+        terms = []
+        for i, c in enumerate(self.canonical_coefficients):
+            if i == 0:
+                terms.append(f"{c:.6f}")
+            elif i == 1:
+                terms.append(f"+ {c:.6f}*x" if c >= 0 else f"- {abs(c):.6f}*x")
+            else:
+                terms.append(f"+ {c:.6f}*x^{i}" if c >= 0 else f"- {abs(c):.6f}*x^{i}")
         return "P(x) = " + " ".join(terms)
 
     def evaluate(self, x_val: float | np.ndarray) -> float | np.ndarray:
@@ -114,20 +152,19 @@ class NewtonInterpolationResult:
                 result = result * (x_val - self.x_points[i]) + self.coefficients_b[i]
             return float(result)
 
-    def derivative(self, x_val: float, h: float = 1e-6) -> float:
-        """Numerical 5-point central stencil derivative of P(x)."""
-        f = self.evaluate
-        return float((-f(x_val + 2*h) + 8*f(x_val + h) - 8*f(x_val - h) + f(x_val - 2*h)) / (12*h))
+    def derivative(self, x_val: float) -> float:
+        """Exact analytical first derivative P'(x) from expanded canonical polynomial."""
+        res = 0.0
+        for i in range(1, len(self.canonical_coefficients)):
+            res += i * self.canonical_coefficients[i] * (x_val ** (i - 1))
+        return res
 
-    def integrate(self, a: float, b: float, n_steps: int = 1000) -> float:
-        """Composite Simpson's 1/3 integration of the interpolant from a to b."""
-        if n_steps % 2 != 0:
-            n_steps += 1
-        h = (b - a) / n_steps
-        xs = np.linspace(a, b, n_steps + 1)
-        ys = self.evaluate(xs)
-        integral = (h / 3.0) * (ys[0] + 4.0 * np.sum(ys[1:-1:2]) + 2.0 * np.sum(ys[2:-1:2]) + ys[-1])
-        return float(integral)
+    def integrate(self, a: float, b: float) -> float:
+        """Exact analytical definite integral of P(x) from a to b."""
+        res = 0.0
+        for i, c in enumerate(self.canonical_coefficients):
+            res += (c / (i + 1)) * (b ** (i + 1) - a ** (i + 1))
+        return res
 
 
 def newton_interpolate_order(
@@ -136,6 +173,7 @@ def newton_interpolate_order(
     x_target: float,
     order: int,
     prev_value: float | None = None,
+    is_extrapolated: bool = False,
 ) -> NewtonInterpolationResult:
     """
     Fits Newton polynomial of degree `order` using `order + 1` points.
@@ -143,7 +181,7 @@ def newton_interpolate_order(
     """
     num_pts = order + 1
     if len(x_pts) != num_pts or len(y_pts) != num_pts:
-        raise ValueError(f"Order {order} requires exactly {num_pts} data points.")
+        raise ValueError(f"Order {order} requires exactly {num_pts} data points. Got {len(x_pts)}.")
 
     table = build_divided_difference_table(x_pts, y_pts)
     coeffs_b = table[0, :num_pts].copy()
@@ -192,11 +230,12 @@ def newton_interpolate_order(
         term_evaluations=term_evals,
         interpolated_value=total_val,
         approx_error_percent=ea,
+        is_extrapolated=is_extrapolated,
     )
 
 
 # ================================================================
-# COMPLETE NEWTON SUITE (LINEAR, QUADRATIC, CUBIC)
+# COMPLETE NEWTON SUITE (DYNAMIC DATASET SIZE ADAPTATION)
 # ================================================================
 
 def run_newton_interpolation_suite(
@@ -205,13 +244,24 @@ def run_newton_interpolation_suite(
     x_target: float,
     output_dir: Path | None = None,
 ) -> list[NewtonInterpolationResult]:
-    """Runs Linear, Quadratic, and Cubic Newton's Divided Difference interpolation."""
+    """Runs available Newton interpolation orders based on dataset size."""
+    x_arr = np.asarray(x_data, dtype=float)
+    y_arr = np.asarray(y_data, dtype=float)
+    n = len(x_arr)
+    if n < 2:
+        raise ValueError(f"At least 2 data points required for interpolation. Provided: {n}")
+
+    from direct_interpolation import select_bracketed_closest_points
+
+    max_order = min(3, n - 1)
+    available_orders = list(range(1, max_order + 1))
+
     results = []
     prev_val = None
 
-    for order in [1, 2, 3]:
-        x_sel, y_sel = select_closest_points(x_data, y_data, x_target, num_points=order + 1)
-        res = newton_interpolate_order(x_sel, y_sel, x_target, order, prev_val)
+    for order in available_orders:
+        x_sel, y_sel, is_ext = select_bracketed_closest_points(x_arr, y_arr, x_target, num_points=order + 1)
+        res = newton_interpolate_order(x_sel, y_sel, x_target, order, prev_val, is_extrapolated=is_ext)
         results.append(res)
         prev_val = res.interpolated_value
 

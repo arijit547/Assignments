@@ -65,8 +65,71 @@ def gaussian_elimination(A: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 # ================================================================
-# POINT SELECTION HELPER (BRACKETING CLOSEST POINTS)
+# POINT SELECTION HELPER (TRUE BRACKETING & CONTIGUOUS EXPANSION)
 # ================================================================
+
+def select_bracketed_closest_points(
+    x_data: np.ndarray,
+    y_data: np.ndarray,
+    x_target: float,
+    num_points: int,
+) -> tuple[np.ndarray, np.ndarray, bool]:
+    """
+    Selects num_points points from (x_data, y_data) that strictly bracket
+    x_target whenever possible, expanding contiguously by picking the nearest neighbor.
+    
+    Returns:
+        (x_selected, y_selected, is_extrapolated)
+    """
+    x_arr = np.asarray(x_data, dtype=float)
+    y_arr = np.asarray(y_data, dtype=float)
+    n = len(x_arr)
+    if n < num_points:
+        raise ValueError(f"Need at least {num_points} distinct data points. Got {n}.")
+
+    # Sort in ascending order of x
+    sort_idx = np.argsort(x_arr)
+    x_s = x_arr[sort_idx]
+    y_s = y_arr[sort_idx]
+
+    # Validate distinct x-values
+    diffs = np.diff(x_s)
+    if np.any(diffs <= 1e-14):
+        dup_indices = np.where(diffs <= 1e-14)[0]
+        dup_vals = [f"{x_s[idx]:g}" for idx in dup_indices]
+        raise ValueError(f"Duplicate x-values detected at: {', '.join(dup_vals)}. All x-coordinates must be distinct.")
+
+    # Check for extrapolation (target outside dataset domain)
+    if x_target <= x_s[0]:
+        return x_s[:num_points].copy(), y_s[:num_points].copy(), True
+    if x_target >= x_s[-1]:
+        return x_s[-num_points:].copy(), y_s[-num_points:].copy(), True
+
+    # Interior Bracketing:
+    # 1. Locate fundamental bracket interval [x_i, x_{i+1}] enclosing x_target
+    i = int(np.searchsorted(x_s, x_target)) - 1
+    L, R = i, i + 1  # Window containing at least 2 points bracketing x_target
+
+    # 2. Expand window to num_points by iteratively choosing closer adjacent neighbor
+    while (R - L + 1) < num_points:
+        can_left = (L > 0)
+        can_right = (R < n - 1)
+        if can_left and can_right:
+            d_left = abs(x_s[L - 1] - x_target)
+            d_right = abs(x_s[R + 1] - x_target)
+            if d_left <= d_right:
+                L -= 1
+            else:
+                R += 1
+        elif can_left:
+            L -= 1
+        elif can_right:
+            R += 1
+        else:
+            break
+
+    return x_s[L:R + 1].copy(), y_s[L:R + 1].copy(), False
+
 
 def select_closest_points(
     x_data: np.ndarray,
@@ -74,20 +137,9 @@ def select_closest_points(
     x_target: float,
     num_points: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Selects num_points points from (x_data, y_data) that bracket and
-    are closest to x_target, sorted in increasing order of x.
-    """
-    if len(x_data) < num_points:
-        raise ValueError(f"Need at least {num_points} data points. Got {len(x_data)}.")
-
-    # Sort available points by distance to x_target
-    dists = np.abs(x_data - x_target)
-    closest_indices = np.argsort(dists)[:num_points]
-    # Re-sort selected indices by x-value
-    sorted_order = closest_indices[np.argsort(x_data[closest_indices])]
-
-    return x_data[sorted_order].copy(), y_data[sorted_order].copy()
+    """Backward-compatible wrapper returning (x_sel, y_sel)."""
+    xs, ys, _ = select_bracketed_closest_points(x_data, y_data, x_target, num_points)
+    return xs, ys
 
 
 # ================================================================
@@ -104,6 +156,7 @@ class DirectInterpolationResult:
     coefficients: np.ndarray  # [a0, a1, a2, ...]
     interpolated_value: float
     approx_error_percent: float | None = None
+    is_extrapolated: bool = False
     matrix_A: np.ndarray | None = None
     vector_b: np.ndarray | None = None
 
@@ -126,14 +179,14 @@ class DirectInterpolationResult:
         return result
 
     def derivative(self, x_val: float) -> float:
-        """First derivative P'(x) (e.g. acceleration from velocity profile)."""
+        """Exact analytical first derivative P'(x) (e.g. acceleration from velocity profile)."""
         res = 0.0
         for i in range(1, len(self.coefficients)):
             res += i * self.coefficients[i] * (x_val ** (i - 1))
         return res
 
     def integrate(self, a: float, b: float) -> float:
-        """Definite integral of P(x) from a to b (e.g. distance from velocity profile)."""
+        """Exact analytical definite integral of P(x) from a to b (e.g. distance from velocity profile)."""
         res = 0.0
         for i, c in enumerate(self.coefficients):
             res += (c / (i + 1)) * (b ** (i + 1) - a ** (i + 1))
@@ -146,6 +199,7 @@ def direct_interpolate_order(
     x_target: float,
     order: int,
     prev_value: float | None = None,
+    is_extrapolated: bool = False,
 ) -> DirectInterpolationResult:
     """
     Fits polynomial of degree `order` through `order + 1` points.
@@ -155,7 +209,7 @@ def direct_interpolate_order(
     """
     num_pts = order + 1
     if len(x_pts) != num_pts or len(y_pts) != num_pts:
-        raise ValueError(f"Order {order} requires exactly {num_pts} data points.")
+        raise ValueError(f"Order {order} requires exactly {num_pts} data points. Got {len(x_pts)}.")
 
     # Construct Vandermonde matrix V[i, j] = (x_pts[i])^j
     V = np.zeros((num_pts, num_pts), dtype=float)
@@ -185,13 +239,14 @@ def direct_interpolate_order(
         coefficients=coeffs,
         interpolated_value=val,
         approx_error_percent=ea,
+        is_extrapolated=is_extrapolated,
         matrix_A=V,
         vector_b=y_pts,
     )
 
 
 # ================================================================
-# COMPLETE DIRECT METHOD SUITE (LINEAR, QUADRATIC, CUBIC)
+# COMPLETE DIRECT METHOD SUITE (DYNAMIC DATASET SIZE ADAPTATION)
 # ================================================================
 
 def run_direct_interpolation_suite(
@@ -200,14 +255,28 @@ def run_direct_interpolation_suite(
     x_target: float,
     output_dir: Path | None = None,
 ) -> list[DirectInterpolationResult]:
-    """Runs Linear, Quadratic, and Cubic direct interpolation."""
+    """
+    Runs available interpolation orders based on dataset size:
+    - 2 points: Linear only
+    - 3 points: Linear & Quadratic
+    - >= 4 points: Linear, Quadratic, and Cubic
+    """
+    x_arr = np.asarray(x_data, dtype=float)
+    y_arr = np.asarray(y_data, dtype=float)
+    n = len(x_arr)
+    if n < 2:
+        raise ValueError(f"At least 2 data points required for interpolation. Provided: {n}")
+
+    # Maximum feasible order given dataset size (up to cubic)
+    max_order = min(3, n - 1)
+    available_orders = list(range(1, max_order + 1))
+
     results = []
     prev_val = None
 
-    for order in [1, 2, 3]:
-        # Select best closest bracketed points for this order
-        x_sel, y_sel = select_closest_points(x_data, y_data, x_target, num_points=order + 1)
-        res = direct_interpolate_order(x_sel, y_sel, x_target, order, prev_val)
+    for order in available_orders:
+        x_sel, y_sel, is_ext = select_bracketed_closest_points(x_arr, y_arr, x_target, num_points=order + 1)
+        res = direct_interpolate_order(x_sel, y_sel, x_target, order, prev_val, is_extrapolated=is_ext)
         results.append(res)
         prev_val = res.interpolated_value
 

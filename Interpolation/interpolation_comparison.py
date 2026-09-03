@@ -44,55 +44,102 @@ def run_full_comparison(
     output_dir: Path | None = None,
 ) -> dict:
     """
-    Executes Direct, Lagrange, and Newton methods for Orders 1, 2, 3
-    and records values, errors, and execution timings.
+    Executes Direct, Lagrange, and Newton methods for all available orders,
+    measures execution runtime, and rigorously verifies polynomial uniqueness.
     """
-    # 1. Run Direct Method
-    t0 = time.perf_counter()
-    direct_res = run_direct_interpolation_suite(x_data, y_data, x_target)
-    t_direct = (time.perf_counter() - t0) * 1000.0  # ms
+    x_arr = np.asarray(x_data, dtype=float)
+    y_arr = np.asarray(y_data, dtype=float)
 
-    # 2. Run Lagrange Method
-    t0 = time.perf_counter()
-    lagrange_res = run_lagrange_interpolation_suite(x_data, y_data, x_target)
-    t_lagrange = (time.perf_counter() - t0) * 1000.0  # ms
+    # 1. Run Direct Method with micro-benchmarking
+    t0 = time.perf_counter_ns()
+    direct_res = run_direct_interpolation_suite(x_arr, y_arr, x_target)
+    for _ in range(49):
+        run_direct_interpolation_suite(x_arr, y_arr, x_target)
+    t_direct_us = ((time.perf_counter_ns() - t0) / 50.0) / 1000.0  # microseconds
 
-    # 3. Run Newton's Divided Difference Method
-    t0 = time.perf_counter()
-    newton_res = run_newton_interpolation_suite(x_data, y_data, x_target)
-    t_newton = (time.perf_counter() - t0) * 1000.0  # ms
+    # 2. Run Lagrange Method with micro-benchmarking
+    t0 = time.perf_counter_ns()
+    lagrange_res = run_lagrange_interpolation_suite(x_arr, y_arr, x_target)
+    for _ in range(49):
+        run_lagrange_interpolation_suite(x_arr, y_arr, x_target)
+    t_lagrange_us = ((time.perf_counter_ns() - t0) / 50.0) / 1000.0  # microseconds
 
-    # Compile Table 1: Interpolated Values & Approximate Errors
-    comparison_rows = []
+    # 3. Run Newton's Divided Difference Method with micro-benchmarking
+    t0 = time.perf_counter_ns()
+    newton_res = run_newton_interpolation_suite(x_arr, y_arr, x_target)
+    for _ in range(49):
+        run_newton_interpolation_suite(x_arr, y_arr, x_target)
+    t_newton_us = ((time.perf_counter_ns() - t0) / 50.0) / 1000.0  # microseconds
+
+    num_orders = len(direct_res)
     methods_data = [
-        ("Direct Method", direct_res, t_direct, "O(n^3)", "Solves Vandermonde linear system"),
-        ("Lagrange Method", lagrange_res, t_lagrange, "O(n^2)", "Evaluates products of basis weights"),
-        ("Newton's Divided Diff.", newton_res, t_newton, "O(n^2)", "Constructs triangular difference table"),
+        ("Direct Method", direct_res, t_direct_us, "O(n^3)", "Solves Vandermonde system via Gauss elimination"),
+        ("Lagrange Method", lagrange_res, t_lagrange_us, "O(n^2)", "Evaluates products of basis weights directly"),
+        ("Newton's Divided Diff.", newton_res, t_newton_us, "O(n^2)", "Triangular difference table + Horner evaluation"),
     ]
 
-    for m_name, res_list, t_exec, complexity, notes in methods_data:
-        v1 = res_list[0].interpolated_value
-        v2 = res_list[1].interpolated_value
-        v3 = res_list[2].interpolated_value
-        ea2 = res_list[1].approx_error_percent
-        ea3 = res_list[2].approx_error_percent
-
-        comparison_rows.append({
+    # Build Master Comparison Table (dynamically adapts to available orders)
+    comparison_rows = []
+    for m_name, res_list, t_exec, complexity, _ in methods_data:
+        row = {
             "Method": m_name,
-            "Linear (n=1)": v1,
-            "Quadratic (n=2)": v2,
-            "|ea| (1->2) (%)": ea2,
-            "Cubic (n=3)": v3,
-            "|ea| (2->3) (%)": ea3,
-            "Complexity": complexity,
-        })
+            "Linear (n=1)": res_list[0].interpolated_value,
+        }
+        if num_orders >= 2:
+            row["Quadratic (n=2)"] = res_list[1].interpolated_value
+            row["|ea| (1->2) (%)"] = res_list[1].approx_error_percent
+        if num_orders >= 3:
+            row["Cubic (n=3)"] = res_list[2].interpolated_value
+            row["|ea| (2->3) (%)"] = res_list[2].approx_error_percent
+
+        row["Runtime (us)"] = f"{t_exec:.1f} us"
+        row["Complexity"] = complexity
+        comparison_rows.append(row)
 
     df_comparison = pd.DataFrame(comparison_rows)
 
-    # Verification of Uniqueness Theorem
-    diff_dir_lag = abs(direct_res[2].interpolated_value - lagrange_res[2].interpolated_value)
-    diff_dir_new = abs(direct_res[2].interpolated_value - newton_res[2].interpolated_value)
-    uniqueness_verified = max(diff_dir_lag, diff_dir_new) < 1e-10
+    # ----------------------------------------------------------------
+    # Rigorous Domain-Wide Uniqueness Verification Across All Orders
+    # ----------------------------------------------------------------
+    x_min = float(np.min(x_arr))
+    x_max = float(np.max(x_arr))
+    domain_grid = np.linspace(x_min, x_max, 50)
+
+    uniqueness_records = []
+    all_unique = True
+    overall_max_discrepancy = 0.0
+
+    order_names = {1: "Linear (1st Order)", 2: "Quadratic (2nd Order)", 3: "Cubic (3rd Order)"}
+
+    for k in range(num_orders):
+        ord_num = k + 1
+        rd = direct_res[k]
+        rl = lagrange_res[k]
+        rn = newton_res[k]
+
+        yd = rd.evaluate(domain_grid)
+        yl = rl.evaluate(domain_grid)
+        yn = rn.evaluate(domain_grid)
+
+        diff_dl = float(np.max(np.abs(yd - yl)))
+        diff_dn = float(np.max(np.abs(yd - yn)))
+        diff_ln = float(np.max(np.abs(yl - yn)))
+        max_diff = max(diff_dl, diff_dn, diff_ln)
+        overall_max_discrepancy = max(overall_max_discrepancy, max_diff)
+
+        is_ord_unique = max_diff < 1e-10
+        if not is_ord_unique:
+            all_unique = False
+
+        uniqueness_records.append({
+            "Order": ord_num,
+            "Polynomial Type": order_names.get(ord_num, f"{ord_num}-th"),
+            "Points Used": ", ".join(f"{x:g}" for x in rd.x_points),
+            "Max Residual Across Domain": f"{max_diff:.2e}",
+            "Uniqueness Status": "VERIFIED (Identical)" if is_ord_unique else "DISCREPANCY DETECTED",
+        })
+
+    df_uniqueness = pd.DataFrame(uniqueness_records)
 
     # True error if exact function provided
     df_true_error = None
@@ -110,17 +157,19 @@ def run_full_comparison(
     if output_dir:
         output_dir.mkdir(exist_ok=True, parents=True)
         df_comparison.to_csv(output_dir / "master_interpolation_comparison.csv", index=False)
+        df_uniqueness.to_csv(output_dir / "uniqueness_verification.csv", index=False)
         if df_true_error is not None:
             df_true_error.to_csv(output_dir / "true_error_comparison.csv", index=False)
 
     return {
         "df_comparison": df_comparison,
+        "df_uniqueness": df_uniqueness,
         "df_true_error": df_true_error,
         "direct_res": direct_res,
         "lagrange_res": lagrange_res,
         "newton_res": newton_res,
-        "uniqueness_verified": uniqueness_verified,
-        "max_discrepancy": max(diff_dir_lag, diff_dir_new),
+        "uniqueness_verified": all_unique,
+        "max_discrepancy": overall_max_discrepancy,
     }
 
 
@@ -218,11 +267,12 @@ def run_cli():
     comp = run_full_comparison(x_data, y_data, x_target, output_dir=out_dir)
 
     print(format_table_console(comp["df_comparison"], f"INTERPOLATION PERFORMANCE COMPARISON (Target x = {x_target:g})"))
+    print(format_table_console(comp["df_uniqueness"], "DOMAIN-WIDE POLYNOMIAL UNIQUENESS PROOF (50 Sample Grid Points Across Domain)"))
 
     print("\n--- Theoretical Property Verification: Uniqueness of Interpolating Polynomial ---")
     if comp["uniqueness_verified"]:
-        print("  [PASSED] Uniqueness Theorem Verified:")
-        print(f"  P_Direct(x*) == P_Lagrange(x*) == P_Newton(x*) within floating-point tolerance ({comp['max_discrepancy']:.2e}).")
+        print("  [PASSED] Uniqueness Theorem Mathematically Verified:")
+        print(f"  P_Direct(x) == P_Lagrange(x) == P_Newton(x) across entire domain (Max residual: {comp['max_discrepancy']:.2e}).")
         print("  Theoretical Insight: For any set of n+1 distinct points, there exists a UNIQUE")
         print("  polynomial of degree <= n that passes through all points.")
         print("  The Direct, Lagrange, and Newton methods are simply three different algebraic")

@@ -47,6 +47,27 @@ class LagrangeBasisTerm:
 @dataclass
 class LagrangeInterpolationResult:
     order: int
+def lagrange_to_standard_poly(x_pts: np.ndarray, y_pts: np.ndarray) -> np.ndarray:
+    """
+    Expands the Lagrange basis polynomial sum into standard canonical polynomial
+    coefficients [a0, a1, ..., an] where P(x) = sum(a_i * x^i).
+    """
+    n = len(x_pts)
+    total_poly = np.zeros(n, dtype=float)
+    for i in range(n):
+        poly_num = np.array([1.0], dtype=float)
+        den = 1.0
+        for j in range(n):
+            if i != j:
+                poly_num = np.convolve(poly_num, [-x_pts[j], 1.0])
+                den *= (x_pts[i] - x_pts[j])
+        total_poly += y_pts[i] * (poly_num / den)
+    return total_poly
+
+
+@dataclass
+class LagrangeInterpolationResult:
+    order: int
     name: str
     x_points: np.ndarray
     y_points: np.ndarray
@@ -54,6 +75,12 @@ class LagrangeInterpolationResult:
     basis_terms: list[LagrangeBasisTerm]
     interpolated_value: float
     approx_error_percent: float | None = None
+    is_extrapolated: bool = False
+    canonical_coefficients: np.ndarray | None = None
+
+    def __post_init__(self):
+        if self.canonical_coefficients is None:
+            self.canonical_coefficients = lagrange_to_standard_poly(self.x_points, self.y_points)
 
     def evaluate(self, x_val: float | np.ndarray) -> float | np.ndarray:
         """Evaluate Lagrange polynomial at any arbitrary x."""
@@ -80,20 +107,31 @@ class LagrangeInterpolationResult:
                 val += L_i * self.y_points[i]
             return float(val)
 
-    def derivative(self, x_val: float, h: float = 1e-6) -> float:
-        """Numerical 5-point central stencil derivative of P(x)."""
-        f = self.evaluate
-        return float((-f(x_val + 2*h) + 8*f(x_val + h) - 8*f(x_val - h) + f(x_val - 2*h)) / (12*h))
+    def derivative(self, x_val: float) -> float:
+        """Exact analytical first derivative P'(x) from expanded canonical polynomial."""
+        res = 0.0
+        for i in range(1, len(self.canonical_coefficients)):
+            res += i * self.canonical_coefficients[i] * (x_val ** (i - 1))
+        return res
 
-    def integrate(self, a: float, b: float, n_steps: int = 1000) -> float:
-        """Composite Simpson's 1/3 integration of the interpolant from a to b."""
-        if n_steps % 2 != 0:
-            n_steps += 1
-        h = (b - a) / n_steps
-        xs = np.linspace(a, b, n_steps + 1)
-        ys = self.evaluate(xs)
-        integral = (h / 3.0) * (ys[0] + 4.0 * np.sum(ys[1:-1:2]) + 2.0 * np.sum(ys[2:-1:2]) + ys[-1])
-        return float(integral)
+    def integrate(self, a: float, b: float) -> float:
+        """Exact analytical definite integral of P(x) from a to b."""
+        res = 0.0
+        for i, c in enumerate(self.canonical_coefficients):
+            res += (c / (i + 1)) * (b ** (i + 1) - a ** (i + 1))
+        return res
+
+    @property
+    def polynomial_string(self) -> str:
+        terms = []
+        for i, c in enumerate(self.canonical_coefficients):
+            if i == 0:
+                terms.append(f"{c:.6f}")
+            elif i == 1:
+                terms.append(f"+ {c:.6f}*x" if c >= 0 else f"- {abs(c):.6f}*x")
+            else:
+                terms.append(f"+ {c:.6f}*x^{i}" if c >= 0 else f"- {abs(c):.6f}*x^{i}")
+        return "P(x) = " + " ".join(terms)
 
 
 def lagrange_interpolate_order(
@@ -102,6 +140,7 @@ def lagrange_interpolate_order(
     x_target: float,
     order: int,
     prev_value: float | None = None,
+    is_extrapolated: bool = False,
 ) -> LagrangeInterpolationResult:
     """
     Fits Lagrange polynomial of degree `order` using `order + 1` points.
@@ -109,7 +148,7 @@ def lagrange_interpolate_order(
     """
     num_pts = order + 1
     if len(x_pts) != num_pts or len(y_pts) != num_pts:
-        raise ValueError(f"Order {order} requires exactly {num_pts} data points.")
+        raise ValueError(f"Order {order} requires exactly {num_pts} data points. Got {len(x_pts)}.")
 
     basis_terms = []
     total_val = 0.0
@@ -156,11 +195,12 @@ def lagrange_interpolate_order(
         basis_terms=basis_terms,
         interpolated_value=total_val,
         approx_error_percent=ea,
+        is_extrapolated=is_extrapolated,
     )
 
 
 # ================================================================
-# COMPLETE LAGRANGE METHOD SUITE (LINEAR, QUADRATIC, CUBIC)
+# COMPLETE LAGRANGE METHOD SUITE (DYNAMIC DATASET SIZE ADAPTATION)
 # ================================================================
 
 def run_lagrange_interpolation_suite(
@@ -169,13 +209,24 @@ def run_lagrange_interpolation_suite(
     x_target: float,
     output_dir: Path | None = None,
 ) -> list[LagrangeInterpolationResult]:
-    """Runs Linear, Quadratic, and Cubic Lagrange interpolation."""
+    """Runs available Lagrange interpolation orders based on dataset size."""
+    x_arr = np.asarray(x_data, dtype=float)
+    y_arr = np.asarray(y_data, dtype=float)
+    n = len(x_arr)
+    if n < 2:
+        raise ValueError(f"At least 2 data points required for interpolation. Provided: {n}")
+
+    from direct_interpolation import select_bracketed_closest_points
+
+    max_order = min(3, n - 1)
+    available_orders = list(range(1, max_order + 1))
+
     results = []
     prev_val = None
 
-    for order in [1, 2, 3]:
-        x_sel, y_sel = select_closest_points(x_data, y_data, x_target, num_points=order + 1)
-        res = lagrange_interpolate_order(x_sel, y_sel, x_target, order, prev_val)
+    for order in available_orders:
+        x_sel, y_sel, is_ext = select_bracketed_closest_points(x_arr, y_arr, x_target, num_points=order + 1)
+        res = lagrange_interpolate_order(x_sel, y_sel, x_target, order, prev_val, is_extrapolated=is_ext)
         results.append(res)
         prev_val = res.interpolated_value
 
