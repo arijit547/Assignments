@@ -43,10 +43,6 @@ class LagrangeBasisTerm:
     evaluated_weight: float  # L_i(x*)
     contribution: float      # L_i(x*) * y_i
 
-
-@dataclass
-class LagrangeInterpolationResult:
-    order: int
 def lagrange_to_standard_poly(x_pts: np.ndarray, y_pts: np.ndarray) -> np.ndarray:
     """
     Expands the Lagrange basis polynomial sum into standard canonical polynomial
