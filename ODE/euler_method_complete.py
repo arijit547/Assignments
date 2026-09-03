@@ -155,53 +155,76 @@ rows = []
 for h in step_sizes:
 
     theta_480 = solutions[h]["theta"][-1]
-
     true_error = exact_final - theta_480
-
     relative_error = (
-        abs(true_error) / exact_final
-    ) * 100
+        abs(true_error) / exact_final * 100
+        if exact_final != 0 else np.nan
+    )
 
-    rows.append([
-        h,
-        theta_480,
-        true_error,
-        relative_error
-    ])
+    rows.append({
+        "Step, h": h,
+        "theta(480)": theta_480,
+        "Et": true_error,
+        "|et|%": relative_error,
+    })
 
 
-table = pd.DataFrame(
-    rows,
-    columns=[
-        "Step, h",
-        "theta(480)",
-        "Et",
-        "|et|%"
-    ]
-)
+table = pd.DataFrame(rows)
 
 
 # ============================================================
 # DISPLAY TABLE
 # ============================================================
 
-print("\n")
-print("=" * 70)
-print("TABLE 1. Temperature at 480 seconds as a function of step size, h")
-print("=" * 70)
+def format_table_console(df: pd.DataFrame, title: str) -> str:
+    headers = list(df.columns)
+    formatted_rows = []
+    for _, row in df.iterrows():
+        f_row = []
+        for i, val in enumerate(row):
+            if isinstance(val, (int, np.integer)):
+                s = f"{val}"
+            elif isinstance(val, (float, np.floating)):
+                if "%" in headers[i]:
+                    s = f"{val:.4f}%"
+                elif "Step" in headers[i]:
+                    s = f"{val:g}"
+                else:
+                    s = f"{val:.2f}"
+            else:
+                s = str(val)
+            f_row.append(s)
+        formatted_rows.append(f_row)
 
-print(
-    table.to_string(
-        index=False,
-        formatters={
-            "theta(480)": "{:.2f}".format,
-            "Et": "{:.2f}".format,
-            "|et|%": "{:.4f}".format
-        }
-    )
-)
+    widths = [
+        max(len(h), max((len(r[i]) for r in formatted_rows), default=0))
+        for i, h in enumerate(headers)
+    ]
 
-print("\nExact theta(480) =", exact_final, "K")
+    header_str = " | ".join(h.rjust(widths[i]) for i, h in enumerate(headers))
+    sep_str = "-+-".join("-" * widths[i] for i in range(len(headers)))
+    line_width = len(header_str)
+
+    lines = [
+        "",
+        "=" * line_width,
+        title.center(line_width),
+        "=" * line_width,
+        header_str,
+        sep_str,
+    ]
+    for r in formatted_rows:
+        lines.append(" | ".join(r[i].rjust(widths[i]) for i in range(len(headers))))
+    lines.append("=" * line_width)
+    return "\n".join(lines)
+
+
+print(format_table_console(
+    table,
+    "TABLE 1. Temperature at 480 seconds as a function of step size, h"
+))
+
+print(f"\nExact theta(480) = {exact_final:.2f} K")
 
 
 # ============================================================

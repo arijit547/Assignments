@@ -231,6 +231,56 @@ def create_output_directory():
 
 
 # ================================================================
+# TABLE FORMATTING & CONSOLE DISPLAY HELPER
+# ================================================================
+
+def format_table_console(df: pd.DataFrame, title: str) -> str:
+    """Format DataFrame as a clean, aligned, ASCII-safe console table."""
+    headers = list(df.columns)
+    formatted_rows = []
+    for _, row in df.iterrows():
+        f_row = []
+        for i, val in enumerate(row):
+            if isinstance(val, (int, np.integer)):
+                s = f"{val}"
+            elif isinstance(val, (float, np.floating)):
+                if "%" in headers[i] or "|et|" in headers[i]:
+                    s = f"{val:.4f}%"
+                elif "Step" in headers[i] or headers[i].startswith("i"):
+                    s = f"{val:g}"
+                elif abs(val) < 1e-4 and val != 0:
+                    s = f"{val:.6e}"
+                else:
+                    s = f"{val:.4f}"
+            else:
+                s = str(val)
+            f_row.append(s)
+        formatted_rows.append(f_row)
+
+    widths = [
+        max(len(h), max((len(r[i]) for r in formatted_rows), default=0))
+        for i, h in enumerate(headers)
+    ]
+
+    header_str = " | ".join(h.rjust(widths[i]) for i, h in enumerate(headers))
+    sep_str = "-+-".join("-" * widths[i] for i in range(len(headers)))
+    line_width = len(header_str)
+
+    lines = [
+        "",
+        "=" * line_width,
+        title.center(line_width),
+        "=" * line_width,
+        header_str,
+        sep_str,
+    ]
+    for r in formatted_rows:
+        lines.append(" | ".join(r[i].rjust(widths[i]) for i in range(len(headers))))
+    lines.append("=" * line_width)
+    return "\n".join(lines)
+
+
+# ================================================================
 # TABLE GENERATION
 # ================================================================
 
@@ -239,63 +289,100 @@ def generate_results_table(
     reference_function,
     output: Path,
 ):
-
-    rhs = build_reference_function(
-        problem
-    )
-
+    """
+    Generate summary table across all step sizes for Euler's method.
+    """
+    rhs = build_reference_function(problem)
     rows = []
+    dep = problem.dependent_name
+    xf = problem.xf
 
     for h in problem.step_sizes:
-
-        x_values, y_values = (
-            euler_method(
-                rhs,
-                problem.x0,
-                problem.y0,
-                problem.xf,
-                h,
-            )
+        x_values, y_values = euler_method(
+            rhs,
+            problem.x0,
+            problem.y0,
+            problem.xf,
+            h,
         )
 
         numerical_final = y_values[-1]
-
-        reference_final = float(
-            reference_function(
-                problem.xf
-            )
-        )
-
-        error = (
-            reference_final -
-            numerical_final
-        )
+        reference_final = float(reference_function(problem.xf))
+        error = reference_final - numerical_final
 
         if reference_final != 0:
-            error_percent = (
-                abs(error) /
-                abs(reference_final)
-            ) * 100
+            error_percent = (abs(error) / abs(reference_final)) * 100
         else:
             error_percent = np.nan
 
         rows.append(
             {
-                "Step size h": h,
-                "Euler y(xf)": numerical_final,
-                "Reference y(xf)": reference_final,
-                "Error": error,
-                "Absolute error %": error_percent,
+                "Step size, h": h,
+                f"Euler {dep}({xf:g})": numerical_final,
+                f"Exact {dep}({xf:g})": reference_final,
+                "True Error (Et)": error,
+                "|et| (%)": error_percent,
             }
         )
 
     table = pd.DataFrame(rows)
-
     table.to_csv(
         output / "euler_results.csv",
         index=False,
     )
+    table.to_csv(
+        output / "euler_summary_table.csv",
+        index=False,
+    )
+    return table
 
+
+def generate_iteration_table(
+    problem: ODEProblem,
+    reference_function,
+    h: float,
+    output: Path,
+):
+    """
+    Generate detailed step-by-step iteration table for a specific step size h.
+    """
+    rhs = build_reference_function(problem)
+    number_of_steps = round((problem.xf - problem.x0) / h)
+    dep = problem.dependent_name
+    indep = problem.independent_name
+
+    x = problem.x0
+    y = problem.y0
+    rows = []
+
+    for i in range(number_of_steps):
+        slope = float(rhs(x, y))
+        x_next = x + h
+        y_next = y + h * slope
+        y_exact = float(reference_function(x_next))
+        error = y_exact - y_next
+        error_percent = (abs(error) / abs(y_exact) * 100) if y_exact != 0 else np.nan
+
+        rows.append(
+            {
+                "Step i": i,
+                f"{indep}_i": x,
+                f"{dep}_i": y,
+                f"f({indep}_i, {dep}_i)": slope,
+                f"{dep}_(i+1)": y_next,
+                f"Exact {dep}_(i+1)": y_exact,
+                "True Error (Et)": error,
+                "|et| (%)": error_percent,
+            }
+        )
+        x = x_next
+        y = y_next
+
+    table = pd.DataFrame(rows)
+    table.to_csv(
+        output / f"euler_steps_h{h:g}.csv",
+        index=False,
+    )
     return table
 
 
@@ -548,21 +635,24 @@ def plot_step_size_effect(
     problem: ODEProblem,
     output: Path,
 ):
+    step_col = table.columns[0]
+    num_col = table.columns[1]
+    ref_col = table.columns[2]
 
     plt.figure(
         figsize=(9, 5)
     )
 
     plt.plot(
-        table["Step size h"],
-        table["Euler y(xf)"],
+        table[step_col],
+        table[num_col],
         marker="o",
         linewidth=2,
         label="Euler",
     )
 
     plt.axhline(
-        table["Reference y(xf)"].iloc[0],
+        table[ref_col].iloc[0],
         linestyle="--",
         linewidth=1.5,
         label="Exact / Reference",
@@ -604,24 +694,13 @@ def plot_step_size_effect(
 # ================================================================
 
 def print_results(table: pd.DataFrame):
+    title = "EULER'S METHOD SUMMARY TABLE"
+    print(format_table_console(table, title))
 
-    print("\n")
-    print("=" * 90)
-    print("EULER'S METHOD RESULTS")
-    print("=" * 90)
 
-    print(
-        table.to_string(
-            index=False,
-            formatters={
-                "Step size h": "{:.6g}".format,
-                "Euler y(xf)": "{:.8f}".format,
-                "Reference y(xf)": "{:.8f}".format,
-                "Error": "{:.8f}".format,
-                "Absolute error %": "{:.6f}".format,
-            },
-        )
-    )
+def print_iteration_results(table: pd.DataFrame, h: float):
+    title = f"EULER'S METHOD STEP-BY-STEP ITERATION TABLE (h = {h:g})"
+    print(format_table_console(table, title))
 
 
 # ================================================================
@@ -739,11 +818,30 @@ def main():
         )
     
         # ------------------------------------------------------------
-        # STEP 4: Print table
+        # STEP 4: Print summary and iteration tables
         # ------------------------------------------------------------
     
         print_results(
             table
+        )
+
+        sorted_steps = sorted(
+            problem.step_sizes
+        )
+    
+        comparison_h = (
+            sorted_steps[len(sorted_steps) // 2]
+        )
+
+        iter_table = generate_iteration_table(
+            problem,
+            reference_function,
+            comparison_h,
+            output,
+        )
+        print_iteration_results(
+            iter_table,
+            comparison_h,
         )
     
         # ------------------------------------------------------------

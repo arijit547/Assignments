@@ -91,6 +91,7 @@ FUNCTIONS = {
     "exp": sp.exp,
     "log": sp.log,
     "ln": sp.log,
+    "log10": lambda arg: sp.log(arg, 10),
 
     "sqrt": sp.sqrt,
     "cbrt": sp.real_root,
@@ -548,6 +549,7 @@ class ODEInputGUI(tk.Tk):
         self.equation_entry.focus_set()
         
         self.equation_var.trace_add("write", lambda *args: self._update_latex_preview())
+        self.exact_var.trace_add("write", lambda *args: self._update_latex_preview())
         self.equation_entry.bind("<Return>", lambda e: self.validate_equation())
 
         # Live Canvas Input Area
@@ -574,48 +576,52 @@ class ODEInputGUI(tk.Tk):
         keypad_inner = tk.Frame(frame, bg="#f8f9fa", padx=10, pady=10)
         keypad_inner.pack(fill="both", expand=True)
 
-        # Desmos-like layout
+        # Fully functional 10-column ODE keypad layout
         keys = [
             ["VAR_X", "VAR_Y", "a²", "a^b", "7", "8", "9", "÷", "funcs"],
-            ["(", ")", "<", ">", "4", "5", "6", "×", "←", "→"],
-            ["|a|", ",", "≤", "≥", "1", "2", "3", "−", "Backspace"],
-            ["ABC", "Enter", "√", "π", "0", ".", "=", "+", "Enter"]
+            ["(", ")", "ln", "exp", "4", "5", "6", "×", "←", "→"],
+            ["|a|", "√", "e", "π", "1", "2", "3", "−", "Backspace"],
+            ["Clear", "sin", "cos", "0", ".", ",", "+", "Enter"]
         ]
 
         def get_btn_bg(k):
             if k.isdigit() or k == ".": return "#ffffff"
-            if k in ["funcs", "Backspace", "Enter", "←", "→"]: return "#dadce0"
-            if k == "Enter_Blue": return "#4285f4"
+            if k == "Clear": return "#fce8e6"
+            if k in ["funcs", "Backspace", "←", "→"]: return "#dadce0"
+            if k == "Enter": return "#4285f4"
             return "#f1f3f4"
             
         def get_btn_fg(k):
-            if k == "Enter_Blue": return "#ffffff"
+            if k == "Clear": return "#c5221f"
+            if k == "Enter": return "#ffffff"
             return "#202124"
 
         for row_index, row in enumerate(keys):
             col_offset = 0
             for item in row:
-                if item == "Enter" and row_index == 3 and col_offset == 8:
-                    bg = "#4285f4"
-                    fg = "#ffffff"
-                    display_text = "↵"
-                else:
-                    bg = get_btn_bg(item)
-                    fg = get_btn_fg(item)
-                    display_text = item
+                bg = get_btn_bg(item)
+                fg = get_btn_fg(item)
+                display_text = item
+                
+                colspan = 1
+                if item == "funcs":
+                    colspan = 2
+                elif item == "Backspace":
+                    colspan = 2
+                elif item == "Clear":
+                    colspan = 2
+                elif item == "Enter":
+                    colspan = 2
+                    display_text = "↵ Enter"
                 
                 if item == "VAR_X": display_text = self.independent_var.get() or "x"
                 if item == "VAR_Y": display_text = self.dependent_var.get() or "y"
                 
                 btn = tk.Button(
-                    keypad_inner, text=display_text, font=("Segoe UI", 12, "bold"),
+                    keypad_inner, text=display_text, font=("Segoe UI", 11, "bold"),
                     bg=bg, fg=fg, activebackground="#e8eaed", relief="flat", borderwidth=1, highlightbackground="#dadce0",
                     command=lambda v=item: self._keypad_press(v)
                 )
-                
-                # Span funcs and backspace across two columns for spacing mimicry
-                colspan = 2 if item in ["funcs", "Backspace", "Enter"] and col_offset >= 8 else 1
-                if item == "Enter" and row_index == 3 and col_offset == 1: colspan = 1
                 
                 btn.grid(row=row_index, column=col_offset, sticky="nsew", padx=3, pady=3, columnspan=colspan)
                 
@@ -669,9 +675,12 @@ class ODEInputGUI(tk.Tk):
         if not self.equation_entry:
             return
             
-        if key == "Backspace":
+        if key == "Clear":
+            self.equation_var.set("")
+            self.equation_entry.focus_set()
+            return
+        elif key == "Backspace":
             try:
-                # Delete character before cursor
                 cursor_idx = self.equation_entry.index(tk.INSERT)
                 if cursor_idx > 0:
                     self.equation_entry.delete(cursor_idx - 1)
@@ -695,8 +704,6 @@ class ODEInputGUI(tk.Tk):
                 self.equation_entry.icursor(min(len(self.equation_entry.get()), idx + 1))
             except tk.TclError:
                 pass
-        elif key in ["<", ">", "≤", "≥", "ABC"]:
-            pass # Ignoring unimplemented visual keys for ODE input
         else:
             text = ""
             if key == "VAR_X":
@@ -715,16 +722,20 @@ class ODEInputGUI(tk.Tk):
                 text = "-"
             elif key == "π":
                 text = "pi"
+            elif key == "e":
+                text = "e"
             elif key == "√" or key == "sqrt":
                 text = "sqrt("
             elif key == "cbrt":
                 text = "cbrt("
             elif key == "|a|" or key == "|x|":
                 text = "abs("
-            elif key == "e^x":
+            elif key == "e^x" or key == "exp":
                 text = "exp("
+            elif key == "ln":
+                text = "ln("
             else:
-                if key in FUNCTIONS or key in ["sin", "cos", "tan", "asin", "acos", "atan", "csc", "sec", "cot", "acsc", "asec", "acot", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "ln", "log", "log10", "exp"]:
+                if key in FUNCTIONS or key in ["sin", "cos", "tan", "asin", "acos", "atan", "csc", "sec", "cot", "acsc", "asec", "acot", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "log", "log10"]:
                     text = key + "("
                 else:
                     text = key
@@ -742,10 +753,30 @@ class ODEInputGUI(tk.Tk):
         frame = tk.Frame(parent, bg="#ffffff", bd=1, relief="solid", highlightbackground="#dadce0", highlightthickness=1)
         frame.pack(fill="x")
         
-        tk.Label(frame, text="Problem Data", font=("Segoe UI", 12, "bold"), bg="#ffffff", fg="#5f6368").pack(anchor="w", padx=10, pady=(10, 0))
+        tk.Label(frame, text="Problem Data & Presets", font=("Segoe UI", 12, "bold"), bg="#ffffff", fg="#5f6368").pack(anchor="w", padx=10, pady=(10, 0))
+
+        # Quick Presets Selector
+        preset_frame = tk.Frame(frame, bg="#ffffff")
+        preset_frame.pack(fill="x", padx=15, pady=(8, 0))
+        tk.Label(preset_frame, text="Load Preset Problem:", font=("Segoe UI", 10, "bold"), bg="#ffffff", fg="#1a73e8").pack(anchor="w")
+
+        self.preset_combobox = ttk.Combobox(
+            preset_frame,
+            values=[
+                "Default Slide: Radiation Cooling (theta, t)",
+                "Example 1: Exponential Decay (dy/dx = -2*y)",
+                "Example 2: Simple Polynomial (dy/dx = 4*x - 2*y)",
+                "Example 3: Harmonic/Trig (dy/dx = cos(x) - y)",
+                "Custom / Blank",
+            ],
+            state="readonly",
+            font=("Segoe UI", 10),
+        )
+        self.preset_combobox.pack(fill="x", pady=(3, 5))
+        self.preset_combobox.bind("<<ComboboxSelected>>", self._on_preset_selected)
 
         grid_frame = tk.Frame(frame, bg="#ffffff")
-        grid_frame.pack(fill="x", padx=15, pady=15)
+        grid_frame.pack(fill="x", padx=15, pady=10)
 
         def create_labeled_entry(row, label_text, var):
             lbl = tk.Label(grid_frame, text=label_text, font=("Segoe UI", 12), bg="#ffffff")
@@ -777,6 +808,50 @@ class ODEInputGUI(tk.Tk):
             status_frame, textvariable=self.status_var, wraplength=400, bg="#e8f0fe", fg="#1967d2", font=("Segoe UI", 11, "bold")
         ).pack(anchor="w")
 
+    def _on_preset_selected(self, event=None):
+        choice = self.preset_combobox.get()
+        if "Radiation Cooling" in choice:
+            self.independent_var.set("t")
+            self.dependent_var.set("theta")
+            self.equation_var.set("-2.2067e-12*(theta**4 - 81e8)")
+            self.x0_var.set("0")
+            self.y0_var.set("1200")
+            self.xf_var.set("480")
+            self.step_var.set("480, 240, 120, 60, 30")
+            self.exact_var.set("")
+        elif "Exponential Decay" in choice:
+            self.independent_var.set("x")
+            self.dependent_var.set("y")
+            self.equation_var.set("-2*y")
+            self.x0_var.set("0")
+            self.y0_var.set("1")
+            self.xf_var.set("2")
+            self.step_var.set("0.5, 0.25, 0.1")
+            self.exact_var.set("exp(-2*x)")
+        elif "Harmonic" in choice:
+            self.independent_var.set("x")
+            self.dependent_var.set("y")
+            self.equation_var.set("cos(x) - y")
+            self.x0_var.set("0")
+            self.y0_var.set("0")
+            self.xf_var.set("3")
+            self.step_var.set("0.5, 0.25, 0.1")
+            self.exact_var.set("0.5*sin(x) + 0.5*cos(x) - 0.5*exp(-x)")
+        elif "Polynomial" in choice:
+            self.independent_var.set("x")
+            self.dependent_var.set("y")
+            self.equation_var.set("4*x - 2*y")
+            self.x0_var.set("0")
+            self.y0_var.set("2")
+            self.xf_var.set("1")
+            self.step_var.set("0.2, 0.1, 0.05")
+            self.exact_var.set("2*x - 1 + 3*exp(-2*x)")
+        elif "Custom" in choice:
+            self.equation_var.set("")
+            self.exact_var.set("")
+
+        self._variable_changed()
+
     # ============================================================
     # LABELS / PREVIEW UPDATES
     # ============================================================
@@ -804,21 +879,88 @@ class ODEInputGUI(tk.Tk):
         indep = self.independent_var.get().strip() or "x"
         dep = self.dependent_var.get().strip() or "y"
         text = self.equation_var.get().strip()
+        exact_text = self.exact_var.get().strip()
 
+        # Greek letter mapping for proper mathematical typography
+        greek_map = {
+            "theta": r"\theta", "θ": r"\theta",
+            "alpha": r"\alpha", "α": r"\alpha",
+            "beta": r"\beta", "β": r"\beta",
+            "gamma": r"\gamma", "γ": r"\gamma",
+            "phi": r"\phi", "φ": r"\phi",
+            "psi": r"\psi", "ψ": r"\psi",
+            "omega": r"\omega", "ω": r"\omega",
+            "delta": r"\delta", "δ": r"\delta",
+            "lambda": r"\lambda", "λ": r"\lambda",
+            "mu": r"\mu", "μ": r"\mu",
+            "nu": r"\nu", "ν": r"\nu",
+            "rho": r"\rho", "ρ": r"\rho",
+            "sigma": r"\sigma", "σ": r"\sigma",
+            "tau": r"\tau", "τ": r"\tau",
+        }
+        indep_tex = greek_map.get(indep.lower(), indep)
+        dep_tex = greek_map.get(dep.lower(), dep)
+
+        is_valid_ode = False
         if not text:
-            latex_rhs = "\\text{Enter equation...}"
+            latex_rhs = r"\text{Enter differential equation...}"
         else:
             try:
                 expression, _ = parse_ode(text, indep, dep)
                 latex_rhs = sp.latex(expression)
+                is_valid_ode = True
             except Exception:
-                latex_rhs = "\\text{" + text.replace("_", "\\_").replace("^", "\\^").replace(" ", "\\ ") + "}"
-        
-        self.preview_axes.text(
-            0.5, 0.5,
-            f"$\\frac{{d{dep}}}{{d{indep}}} = {latex_rhs}$",
-            ha="center", va="center", fontsize=22
-        )
+                latex_rhs = None
+
+        exact_latex = None
+        if exact_text:
+            try:
+                exact_expr = parse_exact_solution(exact_text, indep)
+                exact_latex = sp.latex(exact_expr)
+            except Exception:
+                exact_latex = None
+
+        # Dynamically scale font size so long equations never clip
+        total_len = len(latex_rhs) if latex_rhs else len(text)
+        if exact_latex:
+            total_len = max(total_len, len(exact_latex))
+
+        if total_len > 55:
+            fsize = 14
+        elif total_len > 40:
+            fsize = 16
+        elif total_len > 25:
+            fsize = 18
+        else:
+            fsize = 21
+
+        try:
+            if is_valid_ode or not text:
+                ode_str = f"$\\frac{{d{dep_tex}}}{{d{indep_tex}}} = {latex_rhs}$"
+                if exact_latex:
+                    full_latex = f"{ode_str}\n\n${dep_tex}_{{\\mathrm{{exact}}}}({indep_tex}) = {exact_latex}$"
+                    self.preview_axes.text(
+                        0.5, 0.5, full_latex,
+                        ha="center", va="center", fontsize=fsize, color="#1a73e8"
+                    )
+                else:
+                    self.preview_axes.text(
+                        0.5, 0.5, ode_str,
+                        ha="center", va="center", fontsize=fsize, color="#1a73e8" if is_valid_ode else "#80868b"
+                    )
+            else:
+                # Safe plain text rendering while mid-typing incomplete expression (never crashes mathtext)
+                self.preview_axes.text(
+                    0.5, 0.5, f"d{dep}/d{indep} = {text}\n(typing...)",
+                    ha="center", va="center", fontsize=max(14, fsize - 2),
+                    family="monospace", color="#5f6368"
+                )
+        except Exception:
+            self.preview_axes.text(
+                0.5, 0.5, f"d{dep}/d{indep} = {text}",
+                ha="center", va="center", fontsize=16, family="monospace", color="#3c4043"
+            )
+
         self.preview_canvas.draw_idle()
 
     # ============================================================
@@ -878,19 +1020,28 @@ class ODEInputGUI(tk.Tk):
                 modules=["numpy"],
             )
 
-            test_value = float(
-                fn(
-                    0.0,
-                    1.0,
-                )
-            )
+            # Test domain safety across multiple candidate points to avoid false singularity errors
+            candidate_points = []
+            try:
+                candidate_points.append((float(self.x0_var.get().strip()), float(self.y0_var.get().strip())))
+            except Exception:
+                pass
+            candidate_points.extend([(1.0, 1.0), (0.5, 0.5), (2.0, 2.0), (0.0, 1.0)])
 
-            if not math.isfinite(
-                test_value
-            ):
+            test_ok = False
+            last_err = None
+            for tx, ty in candidate_points:
+                try:
+                    res = float(fn(tx, ty))
+                    if math.isfinite(res):
+                        test_ok = True
+                        break
+                except Exception as e:
+                    last_err = e
+
+            if not test_ok:
                 raise ValueError(
-                    "The equation returns NaN/infinity "
-                    "at the test point."
+                    f"The equation could not be evaluated at test points: {last_err}"
                 )
 
             self.status_var.set(
@@ -1018,7 +1169,7 @@ class ODEInputGUI(tk.Tk):
             messagebox.showinfo(
                 "Problem Valid",
                 "All input validation checks passed.\n\n"
-                "The problem is ready for Euler's method.",
+                "The problem is ready for numerical calculation.",
             )
 
             self.destroy()
@@ -1039,20 +1190,22 @@ class ODEInputGUI(tk.Tk):
 # PUBLIC FUNCTION
 # ================================================================
 
-def get_problem() -> ODEProblem | None:
+def get_problem(method_name: str = "ODE Solver") -> ODEProblem | None:
     """
     Launch the GUI and return a validated ODEProblem.
 
     Every numerical-method file can simply do:
 
         from ode_input_gui import get_problem
-        problem = get_problem()
+        problem = get_problem("Heun's Method")
 
     If the user closes the GUI before completing validation,
     None is returned.
     """
 
     app = ODEInputGUI()
+    if method_name:
+        app.title(f"{method_name} - Input & Validation")
 
     def handle_close():
         app.problem = None
