@@ -170,12 +170,15 @@ def build_reference_function(problem: ODEProblem):
 
 def compute_reference_solution(
     problem: ODEProblem,
+    return_label: bool = False,
 ):
     """
-    If the user supplied an exact solution, use it.
+    If the user supplied a valid exact solution, use it.
 
-    Otherwise solve_ivp is used only to obtain a high-accuracy
-    reference solution for comparison.
+    Otherwise solve_ivp (DOP853) is used to obtain a high-accuracy
+    numerical reference solution for comparison.
+
+    Carries explicit provenance ('exact' vs 'numerical') and descriptive label.
     """
 
     if problem.exact_solution is not None:
@@ -202,6 +205,10 @@ def compute_reference_solution(
                     dtype=float,
                 )
 
+            reference.provenance = "exact"
+            reference.label = "Exact Analytical Solution"
+            if return_label:
+                return reference, reference.label
             return reference
         else:
             print(f"\n[WARNING] Exact solution failed verification: {msg}")
@@ -237,6 +244,10 @@ def compute_reference_solution(
     def reference(x_values):
         return result.sol(x_values)[0]
 
+    reference.provenance = "numerical"
+    reference.label = "High-Accuracy Reference (SciPy DOP853)"
+    if return_label:
+        return reference, reference.label
     return reference
 
 
@@ -341,11 +352,16 @@ def generate_results_table(
         else:
             error_percent = np.nan
 
+        ref_col = (
+            f"Exact {dep}({xf:g})"
+            if getattr(reference_function, "provenance", None) == "exact"
+            else f"Reference {dep}({xf:g})"
+        )
         rows.append(
             {
                 "Step size, h": h,
                 f"Heun {dep}({xf:g})": numerical_final,
-                f"Exact {dep}({xf:g})": reference_final,
+                ref_col: reference_final,
                 "True Error (Et)": error,
                 "|et| (%)": error_percent,
             }
@@ -390,6 +406,11 @@ def generate_iteration_table(
         error = y_exact - y_next
         error_percent = (abs(error) / abs(y_exact) * 100) if y_exact != 0 else np.nan
 
+        ref_step_col = (
+            f"Exact {dep}_(i+1)"
+            if getattr(reference_function, "provenance", None) == "exact"
+            else f"Reference {dep}_(i+1)"
+        )
         rows.append(
             {
                 "Step i": i,
@@ -398,7 +419,7 @@ def generate_iteration_table(
                 "k1": k1,
                 "k2": k2,
                 f"{dep}_(i+1)": y_next,
-                f"Exact {dep}_(i+1)": y_exact,
+                ref_step_col: y_exact,
                 "True Error (Et)": error,
                 "|et| (%)": error_percent,
             }
@@ -523,11 +544,13 @@ def plot_reference_vs_heun(
         figsize=(9, 5)
     )
 
+    ref_label = getattr(reference_function, "label", "Exact / Reference")
+
     plt.plot(
         x_reference,
         y_reference,
         linewidth=2.5,
-        label="Exact / Reference",
+        label=ref_label,
     )
 
     plt.plot(
@@ -547,7 +570,7 @@ def plot_reference_vs_heun(
     )
 
     plt.title(
-        "Exact / Reference Solution vs Heun's Method"
+        f"{ref_label} vs Heun's Method (h={comparison_h:g})"
     )
 
     plt.grid(
@@ -596,11 +619,13 @@ def plot_different_step_sizes(
         figsize=(9, 5)
     )
 
+    ref_label = getattr(reference_function, "label", "Exact / Reference")
+
     plt.plot(
         x_reference,
         y_reference,
         linewidth=2.5,
-        label="Exact / Reference",
+        label=ref_label,
     )
 
     for h in problem.step_sizes:
@@ -881,21 +906,20 @@ def main():
             output,
         )
     
-        # Use the middle step size for the first
-        # exact/reference comparison when possible.
+        # Standardize on finest step size for the primary method-vs-reference plot
         sorted_steps = sorted(
             problem.step_sizes
         )
     
-        comparison_h = (
-            sorted_steps[len(sorted_steps) // 2]
+        finest_h = (
+            sorted_steps[0]
         )
     
         plot_reference_vs_heun(
             problem,
             reference_function,
             output,
-            comparison_h,
+            finest_h,
         )
     
         plot_different_step_sizes(

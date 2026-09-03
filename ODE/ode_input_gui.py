@@ -359,12 +359,15 @@ def validate_ode_with_scipy(
     dependent_symbol: sp.Symbol,
     x0: float,
     y0: float,
+    xf: float | None = None,
 ) -> None:
     """
-    Use scipy.solve_ivp only for input/domain validation.
+    Validates that the differential equation is locally evaluable at the initial
+    condition (x0, y0) and integrable across the user's requested interval [x0, xf]
+    using SciPy RK45.
 
-    The actual numerical-method assignment is NOT implemented
-    with solve_ivp.
+    This ensures that singularities, division by zero, non-finite derivatives,
+    or complex outputs across [x0, xf] are detected before running numerical solvers.
     """
 
     fn = sp.lambdify(
@@ -393,35 +396,48 @@ def validate_ode_with_scipy(
             raise
         except Exception as exc:
             raise ValueError(
-                "The ODE could not be evaluated at the initial condition."
+                f"The ODE could not be evaluated at {independent_symbol.name} = {x_value:g}, "
+                f"{dependent_symbol.name} = {float(y_value[0]):g}."
             ) from exc
 
         if not math.isfinite(value):
             raise ValueError(
-                "The ODE returned NaN or infinity."
+                f"The ODE returned NaN or infinity at {independent_symbol.name} = {x_value:g}, "
+                f"{dependent_symbol.name} = {float(y_value[0]):g}."
             )
 
         return [value]
 
+    # 1. First verify evaluability directly at the initial condition
+    try:
+        rhs(x0, [y0])
+    except Exception as exc:
+        raise ValueError(
+            f"The ODE could not be evaluated at the initial condition: {exc}"
+        ) from exc
+
+    # 2. Integrate across the requested domain [x0, xf] (or small step if xf is omitted)
+    interval_end = xf if (xf is not None and xf > x0) else (x0 + 1e-6)
     try:
         result = solve_ivp(
             rhs,
-            (x0, x0 + 1e-6),
+            (x0, interval_end),
             [y0],
             method="RK45",
-            rtol=1e-8,
-            atol=1e-10,
-            max_step=1e-7,
+            rtol=1e-6,
+            atol=1e-8,
+            max_step=max((interval_end - x0) / 50.0, 1e-12),
         )
     except Exception as exc:
         raise ValueError(
-            "SciPy could not validate this ODE at the initial condition."
+            f"SciPy integration failed across interval [{x0:g}, {interval_end:g}]: {exc}"
         ) from exc
 
     if not result.success:
         raise ValueError(
-            "ODE validation failed.\n\n"
-            f"SciPy: {result.message}"
+            f"ODE validation failed across interval [{x0:g}, {interval_end:g}].\n\n"
+            f"SciPy status: {result.message}\n"
+            "The ODE may have a singularity, blow up, or be undefined within [x0, xf]."
         )
 
 
@@ -879,7 +895,19 @@ class ODEInputGUI(tk.Tk):
         self.initial_y_label = create_labeled_entry(1, "Initial y₀", self.y0_var)
         self.final_x_label = create_labeled_entry(2, "Final x", self.xf_var)
         create_labeled_entry(3, "Step sizes", self.step_var)
-        create_labeled_entry(4, "Exact solution (optional)", self.exact_var)
+
+        hint_lbl = tk.Label(
+            grid_frame,
+            text="* Systematic refinement (e.g. h, h/2, h/4) recommended for convergence order analysis.",
+            font=("Segoe UI", 8),
+            fg="#5f6368",
+            bg="#ffffff",
+            anchor="w",
+            justify="left",
+        )
+        hint_lbl.grid(row=4, column=1, sticky="w", padx=(15, 0), pady=(0, 4))
+
+        create_labeled_entry(5, "Exact solution (optional)", self.exact_var)
 
         grid_frame.columnconfigure(1, weight=1)
 
@@ -1212,13 +1240,14 @@ class ODEInputGUI(tk.Tk):
                 step_sizes,
             )
 
-            # SciPy is used only for equation/domain validation.
+            # SciPy is used for full-interval equation/domain validation [x0, xf].
             validate_ode_with_scipy(
                 expression,
                 indep_symbol,
                 dep_symbol,
                 x0,
                 y0,
+                xf,
             )
 
             exact_text = (

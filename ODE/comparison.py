@@ -116,15 +116,23 @@ def run_comparison(
     x0 = problem.x0
     y0 = problem.y0
 
-    # Ensure reference solution
+    # Ensure reference solution and resolve explicit provenance label
     if reference_function is None:
-        reference_function = compute_reference_solution(problem)
-
-    ref_label = (
-        "Exact Analytical Solution"
-        if problem.exact_solution is not None
-        else "High-Accuracy Reference (SciPy DOP853)"
-    )
+        reference_function, ref_label = compute_reference_solution(problem, return_label=True)
+    else:
+        # Respect explicit label and provenance on reference function
+        if hasattr(reference_function, "label"):
+            ref_label = reference_function.label
+        elif hasattr(reference_function, "provenance"):
+            ref_label = (
+                "Exact Analytical Solution"
+                if reference_function.provenance == "exact"
+                else "High-Accuracy Reference (SciPy DOP853)"
+            )
+        elif problem.exact_solution is not None:
+            ref_label = "Exact Analytical Solution"
+        else:
+            ref_label = "High-Accuracy Reference (SciPy DOP853)"
 
     y_exact_final = float(reference_function(xf))
 
@@ -279,12 +287,16 @@ def run_comparison(
         df_costs,
         "TABLE 4: COMPUTATIONAL COST & RHS FUNCTION EVALUATIONS"
     ))
+    print("  [NOTE] Total RHS Function Calls is the deterministic, platform-independent primary metric")
+    print("         of computational cost. Wall-clock execution time (ms) is supplementary and subject to system noise.\n")
 
     if not df_convergence.empty:
         print(format_table_console(
             df_convergence,
             "TABLE 5: EMPIRICAL CONVERGENCE ORDER (p_obs vs p_theory)"
         ))
+        print("  [NOTE] For meaningful convergence-order analysis, use a systematic refinement sequence")
+        print("         such as h, h/2, h/4, ... with constant refinement ratios.\n")
 
     # ------------------------------------------------------------
     # SAVE CSV EXPORTS
