@@ -53,6 +53,10 @@ def rk4_method(
     Returns:
         x_values, y_values
     """
+    if not math.isfinite(h) or h <= 0:
+        raise ValueError(
+            f"Step size h must be a positive finite number, got {h}."
+        )
 
     number_of_steps_float = (xf - x0) / h
 
@@ -144,9 +148,8 @@ def rk4_method(
             )
 
         if abs(y_values[i + 1]) > max_abs_y:
-            raise FloatingPointError(
-                f"RK4 solution became unstable near "
-                f"x={x_values[i+1]:g}."
+            raise OverflowError(
+                f"Numerical solution exceeded magnitude limit ({max_abs_y:g}); computation stopped at step {i+1} near x={x_values[i+1]:g}."
             )
 
     return x_values, y_values
@@ -190,20 +193,33 @@ def compute_reference_solution(
     """
 
     if problem.exact_solution is not None:
-
-        exact_fn = sp.lambdify(
-            problem.independent_symbol,
+        from ode_input_gui import validate_exact_solution
+        is_valid, msg = validate_exact_solution(
             problem.exact_solution,
-            modules=["numpy"],
+            problem.expression,
+            problem.independent_symbol,
+            problem.dependent_symbol,
+            problem.x0,
+            problem.y0,
+            problem.xf,
         )
-
-        def reference(x_values):
-            return np.asarray(
-                exact_fn(x_values),
-                dtype=float,
+        if is_valid:
+            exact_fn = sp.lambdify(
+                problem.independent_symbol,
+                problem.exact_solution,
+                modules=["numpy"],
             )
 
-        return reference
+            def reference(x_values):
+                return np.asarray(
+                    exact_fn(x_values),
+                    dtype=float,
+                )
+
+            return reference
+        else:
+            print(f"\n[WARNING] Exact solution failed verification: {msg}")
+            print("          Falling back to high-accuracy SciPy DOP853 numerical reference solution.\n")
 
     rhs = build_reference_function(
         problem
@@ -266,7 +282,9 @@ def format_table_console(df: pd.DataFrame, title: str) -> str:
             if isinstance(val, (int, np.integer)):
                 s = f"{val}"
             elif isinstance(val, (float, np.floating)):
-                if "%" in headers[i] or "|et|" in headers[i]:
+                if np.isnan(val):
+                    s = "Undefined (Exact=0)"
+                elif "%" in headers[i] or "|et|" in headers[i]:
                     s = f"{val:.4f}%"
                 elif "Step" in headers[i] or headers[i].startswith("i"):
                     s = f"{val:g}"

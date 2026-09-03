@@ -145,8 +145,14 @@ def normalize_math_text(text: str) -> str:
 # ================================================================
 
 def create_symbols(independent_name: str, dependent_name: str):
-    independent_symbol = sp.Symbol(independent_name, real=True)
-    dependent_symbol = sp.Symbol(dependent_name, real=True)
+    indep = independent_name.strip()
+    dep = dependent_name.strip()
+    if indep == dep:
+        raise ValueError(
+            f"Independent and dependent variables must be different (both are '{indep}')."
+        )
+    independent_symbol = sp.Symbol(indep, real=True)
+    dependent_symbol = sp.Symbol(dep, real=True)
     return independent_symbol, dependent_symbol
 
 
@@ -261,6 +267,86 @@ def parse_exact_solution(
         )
 
     return expression
+
+
+def validate_exact_solution(
+    exact_expr: sp.Expr,
+    ode_expr: sp.Expr,
+    independent_symbol: sp.Symbol,
+    dependent_symbol: sp.Symbol,
+    x0: float,
+    y0: float,
+    xf: float,
+) -> tuple[bool, str]:
+    """
+    Validates that the supplied exact solution:
+      1. Satisfies the initial condition: y_exact(x0) == y0.
+      2. Satisfies the differential equation: dy_exact/dx == f(x, y_exact(x)).
+
+    Returns:
+        (is_valid: bool, message: str)
+    """
+    # 1. Check Initial Condition
+    try:
+        y_at_x0 = float(exact_expr.subs(independent_symbol, x0).evalf())
+    except Exception as exc:
+        return False, f"Could not evaluate exact solution at initial point {independent_symbol.name}0 = {x0:g}: {exc}"
+
+    init_diff = abs(y_at_x0 - y0)
+    init_tol = max(1e-4, 1e-4 * abs(y0))
+    if init_diff > init_tol:
+        return False, (
+            f"Initial condition mismatch: exact solution evaluates to {y_at_x0:.6g} at "
+            f"{independent_symbol.name}(0) = {x0:g}, but {dependent_symbol.name}0 is {y0:g} "
+            f"(absolute difference = {init_diff:.4e} > tolerance {init_tol:.4e})."
+        )
+
+    # 2. Check Differential Equation Satisfaction
+    try:
+        dy_exact = sp.diff(exact_expr, independent_symbol)
+        rhs_subs = ode_expr.subs(dependent_symbol, exact_expr)
+        residual_expr = dy_exact - rhs_subs
+
+        # Fast symbolic simplification check
+        try:
+            simp = sp.simplify(residual_expr)
+            if simp == 0:
+                return True, "Exact solution verified symbolically and matches initial condition."
+        except Exception:
+            pass
+
+        # Numerical sampling check across interval [x0, xf]
+        test_points = np.linspace(x0, xf, 15)
+        res_fn = sp.lambdify(independent_symbol, residual_expr, modules=["numpy"])
+        f_fn = sp.lambdify((independent_symbol, dependent_symbol), ode_expr, modules=["numpy"])
+
+        max_res = 0.0
+        max_scale = 1.0
+        for tp in test_points:
+            try:
+                r_val = float(res_fn(tp))
+                y_val = float(exact_expr.subs(independent_symbol, tp).evalf())
+                f_val = float(f_fn(tp, y_val))
+                scale = max(1.0, abs(f_val))
+                if not math.isfinite(r_val):
+                    return False, f"Exact solution derivative produces non-finite residual at {independent_symbol.name} = {tp:g}."
+                if abs(r_val) > max_res:
+                    max_res = abs(r_val)
+                    max_scale = scale
+            except Exception as exc:
+                return False, f"Could not evaluate exact solution ODE residual at {independent_symbol.name} = {tp:g}: {exc}"
+
+        rel_res = max_res / max_scale
+        if rel_res > 1e-3 and max_res > 1e-3:
+            return False, (
+                f"ODE satisfaction failure: exact solution does not satisfy dy/dx = f(x, y). "
+                f"Maximum residual |y'_exact - f(x, y_exact)| = {max_res:.4e} (relative residual = {rel_res:.4e})."
+            )
+
+    except Exception as exc:
+        return False, f"Error validating ODE differential satisfaction: {exc}"
+
+    return True, "Exact solution verified numerically and matches initial condition."
 
 
 # ================================================================
@@ -1097,12 +1183,12 @@ class ODEInputGUI(tk.Tk):
 
             x0 = parse_real_number(
                 self.x0_var.get(),
-                f"Initial {indep}₀",
+                f"Initial {indep}0",
             )
 
             y0 = parse_real_number(
                 self.y0_var.get(),
-                f"Initial {dep}₀",
+                f"Initial {dep}0",
             )
 
             xf = parse_real_number(
@@ -1113,7 +1199,7 @@ class ODEInputGUI(tk.Tk):
             if xf <= x0:
                 raise ValueError(
                     f"Final {indep} must be greater than "
-                    f"initial {indep}₀."
+                    f"initial {indep}0."
                 )
 
             step_sizes = parse_step_sizes(
@@ -1146,6 +1232,17 @@ class ODEInputGUI(tk.Tk):
                     exact_text,
                     indep,
                 )
+                is_valid, msg = validate_exact_solution(
+                    exact_solution,
+                    expression,
+                    indep_symbol,
+                    dep_symbol,
+                    x0,
+                    y0,
+                    xf,
+                )
+                if not is_valid:
+                    raise ValueError(f"Exact Solution Verification Failed:\n{msg}")
 
             self.problem = ODEProblem(
                 expression=expression,
@@ -1187,8 +1284,37 @@ class ODEInputGUI(tk.Tk):
 
 
 # ================================================================
-# PUBLIC FUNCTION
+# PUBLIC FUNCTIONS & BENCHMARK HELPERS
 # ================================================================
+
+def get_slide_default_problem() -> ODEProblem:
+    """
+    Returns the benchmark ODE problem from lecture slides:
+    Radiation cooling of a spherical body:
+        dtheta/dt = -2.2067e-12 * (theta^4 - 81e8)
+        theta(0) = 1200 K
+        tf = 480 s
+        step_sizes = (480.0, 240.0, 120.0, 60.0, 30.0)
+    """
+    indep = "t"
+    dep = "theta"
+    indep_symbol, dep_symbol = create_symbols(indep, dep)
+    expr_str = "-2.2067e-12 * (theta**4 - 81e8)"
+    expr, latex = parse_ode(expr_str, indep, dep)
+    return ODEProblem(
+        expression=expr,
+        latex=latex,
+        independent_name=indep,
+        dependent_name=dep,
+        independent_symbol=indep_symbol,
+        dependent_symbol=dep_symbol,
+        x0=0.0,
+        y0=1200.0,
+        xf=480.0,
+        step_sizes=(480.0, 240.0, 120.0, 60.0, 30.0),
+        exact_solution=None,
+    )
+
 
 def get_problem(method_name: str = "ODE Solver") -> ODEProblem | None:
     """
@@ -1237,9 +1363,9 @@ if __name__ == "__main__":
         )
 
         print(
-            f"Initial: {problem.independent_name}₀ = "
+            f"Initial: {problem.independent_name}0 = "
             f"{problem.x0}, "
-            f"{problem.dependent_name}₀ = "
+            f"{problem.dependent_name}0 = "
             f"{problem.y0}"
         )
 
