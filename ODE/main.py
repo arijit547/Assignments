@@ -17,15 +17,20 @@ Run:
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
+current_dir = Path(__file__).resolve().parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
 import ode_input_gui
-import euler
-import Heun
-import Midpoint_method
-import Ralston_method
-import RK4_method
+euler = importlib.import_module("2023331039-3-EM")
+Heun = importlib.import_module("2023331039-3-HM")
+Midpoint_method = importlib.import_module("2023331039-3-MM")
+Ralston_method = importlib.import_module("2023331039-3-RM")
+RK4_method = importlib.import_module("2023331039-3-RK4")
 import comparison
 
 

@@ -20,14 +20,22 @@ Zero built-in equation solvers used:
 
 from __future__ import annotations
 
-import math
+import importlib
+import sys
 from pathlib import Path
 from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from direct_interpolation import select_closest_points, format_table_console
+current_dir = Path(__file__).resolve().parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
+_mod_dm = importlib.import_module("2023331039-5-DM")
+select_closest_points = _mod_dm.select_closest_points
+select_bracketed_closest_points = _mod_dm.select_bracketed_closest_points
+format_table_console = _mod_dm.format_table_console
 
 
 # ================================================================
@@ -212,7 +220,7 @@ def run_lagrange_interpolation_suite(
     if n < 2:
         raise ValueError(f"At least 2 data points required for interpolation. Provided: {n}")
 
-    from direct_interpolation import select_bracketed_closest_points
+    # select_bracketed_closest_points imported from 2023331039-5-DM at module level
 
     max_order = min(3, n - 1)
     available_orders = list(range(1, max_order + 1))

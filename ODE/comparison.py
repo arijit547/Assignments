@@ -24,7 +24,9 @@ Produces:
 
 from __future__ import annotations
 
+import importlib
 import math
+import sys
 import time
 from pathlib import Path
 
@@ -33,12 +35,27 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import sympy as sp
 
+current_dir = Path(__file__).resolve().parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
 from ode_input_gui import ODEProblem, get_problem, get_slide_default_problem
-from euler import euler_method, compute_reference_solution
-from Heun import heun_method
-from Midpoint_method import midpoint_method
-from Ralston_method import ralston_method
-from RK4_method import rk4_method
+
+_mod_em = importlib.import_module("2023331039-3-EM")
+euler_method = _mod_em.euler_method
+compute_reference_solution = _mod_em.compute_reference_solution
+
+_mod_hm = importlib.import_module("2023331039-3-HM")
+heun_method = _mod_hm.heun_method
+
+_mod_mm = importlib.import_module("2023331039-3-MM")
+midpoint_method = _mod_mm.midpoint_method
+
+_mod_rm = importlib.import_module("2023331039-3-RM")
+ralston_method = _mod_rm.ralston_method
+
+_mod_rk4 = importlib.import_module("2023331039-3-RK4")
+rk4_method = _mod_rk4.rk4_method
 
 
 # ================================================================

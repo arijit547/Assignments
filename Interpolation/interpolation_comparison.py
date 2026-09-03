@@ -17,19 +17,28 @@ Comprehensive Performance Comparison Suite for Numerical Interpolation:
 from __future__ import annotations
 
 import time
+import importlib
 import math
+import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from direct_interpolation import (
-    run_direct_interpolation_suite,
-    format_table_console,
-    get_slide_default_problem,
-)
-from lagrange_interpolation import run_lagrange_interpolation_suite
-from newton_divided_difference import run_newton_interpolation_suite
+current_dir = Path(__file__).resolve().parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
+_mod_dm = importlib.import_module("2023331039-5-DM")
+run_direct_interpolation_suite = _mod_dm.run_direct_interpolation_suite
+format_table_console = _mod_dm.format_table_console
+get_slide_default_problem = _mod_dm.get_slide_default_problem
+
+_mod_lm = importlib.import_module("2023331039-5-LM")
+run_lagrange_interpolation_suite = _mod_lm.run_lagrange_interpolation_suite
+
+_mod_ndd = importlib.import_module("2023331039-5-NDD")
+run_newton_interpolation_suite = _mod_ndd.run_newton_interpolation_suite
 
 
 # ================================================================

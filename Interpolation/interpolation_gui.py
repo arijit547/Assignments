@@ -23,19 +23,28 @@ matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 
-from direct_interpolation import (
-    run_direct_interpolation_suite,
-    get_slide_default_problem,
-    select_bracketed_closest_points,
-    format_table_console,
-)
-from lagrange_interpolation import (
-    run_lagrange_interpolation_suite,
-)
-from newton_divided_difference import (
-    run_newton_interpolation_suite,
-    format_divided_difference_table,
-)
+import sys
+from pathlib import Path
+
+current_dir = Path(__file__).resolve().parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
+import importlib
+
+_mod_dm = importlib.import_module("2023331039-5-DM")
+run_direct_interpolation_suite = _mod_dm.run_direct_interpolation_suite
+get_slide_default_problem = _mod_dm.get_slide_default_problem
+select_bracketed_closest_points = _mod_dm.select_bracketed_closest_points
+format_table_console = _mod_dm.format_table_console
+
+_mod_lm = importlib.import_module("2023331039-5-LM")
+run_lagrange_interpolation_suite = _mod_lm.run_lagrange_interpolation_suite
+
+_mod_ndd = importlib.import_module("2023331039-5-NDD")
+run_newton_interpolation_suite = _mod_ndd.run_newton_interpolation_suite
+format_divided_difference_table = _mod_ndd.format_divided_difference_table
+
 from interpolation_comparison import run_full_comparison
 
 

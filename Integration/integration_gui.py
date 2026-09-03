@@ -10,7 +10,10 @@ Interactive Graphical User Interface for Numerical Integration:
 
 from __future__ import annotations
 
+import importlib
 import math
+import sys
+from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
 import numpy as np
@@ -19,9 +22,25 @@ import sympy as sp
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from trapezoidal import trapezoidal_single, trapezoidal_multiple, trapezoidal_dataset, get_slide_default_problem
-from simpson import simpson_single_2seg, simpson_multiple, simpson_dataset
-from combination import analyze_and_integrate_dataset, get_preset_datasets, generate_decision_dataframe
+current_dir = Path(__file__).resolve().parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
+_mod_tr = importlib.import_module("2023331039-4-TR")
+trapezoidal_single = _mod_tr.trapezoidal_single
+trapezoidal_multiple = _mod_tr.trapezoidal_multiple
+trapezoidal_dataset = _mod_tr.trapezoidal_dataset
+get_slide_default_problem = _mod_tr.get_slide_default_problem
+
+_mod_sr = importlib.import_module("2023331039-4-SR")
+simpson_single_2seg = _mod_sr.simpson_single_2seg
+simpson_multiple = _mod_sr.simpson_multiple
+simpson_dataset = _mod_sr.simpson_dataset
+
+_mod_comb = importlib.import_module("2023331039-4-COMB")
+analyze_and_integrate_dataset = _mod_comb.analyze_and_integrate_dataset
+get_preset_datasets = _mod_comb.get_preset_datasets
+generate_decision_dataframe = _mod_comb.generate_decision_dataframe
 
 
 class IntegrationGUI(tk.Tk):

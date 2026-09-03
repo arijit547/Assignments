@@ -12,14 +12,19 @@ Run:
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
 
-import trapezoidal
-import simpson
-import combination
+current_dir = Path(__file__).resolve().parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
+trapezoidal = importlib.import_module("2023331039-4-TR")
+simpson = importlib.import_module("2023331039-4-SR")
+combination = importlib.import_module("2023331039-4-COMB")
 
 
 def compare_all_on_slide_benchmark():

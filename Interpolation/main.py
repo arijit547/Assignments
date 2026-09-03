@@ -24,9 +24,11 @@ current_dir = Path(__file__).resolve().parent
 if str(current_dir) not in sys.path:
     sys.path.insert(0, str(current_dir))
 
-import direct_interpolation
-import lagrange_interpolation
-import newton_divided_difference
+import importlib
+
+direct_interpolation = importlib.import_module("2023331039-5-DM")
+lagrange_interpolation = importlib.import_module("2023331039-5-LM")
+newton_divided_difference = importlib.import_module("2023331039-5-NDD")
 import interpolation_comparison
 
 
